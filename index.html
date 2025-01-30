@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Healthcare Chatbot</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css">
+    <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="header">
+            <img src="{{ url_for('static', filename='bot_icon.png') }}" alt="Bot Icon" class="bot-icon">
+            <h1>Healthcare Chatbot</h1>
+        </div>
+        <div class="chat-box" id="chat-box">
+            <div class="bot-msg">Hello! How can I assist you today?</div>
+        </div>
+        <div class="input-container">
+            <div class="file-upload-area" id="file-upload-area">
+                <span id="file-name-display"></span>
+                <input type="file" id="document-upload" accept=".pdf,.doc,.docx" style="display: none;">
+                <button id="attach-btn"><i class="fas fa-paperclip"></i></button>
+            </div>
+            <input type="text" id="user-input" placeholder="Type your message or click the mic to speak..." />
+            <button id="voice-btn"><i class="fas fa-microphone"></i><div class="mic-animation"></div></button>
+            <button id="send-btn">Send</button>
+        </div>
+    </div>
+    <div class="typing-indicator" id="typing-indicator" style="display: none;">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+    </div>
+
+    <!-- Add required scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+
+    <script>
+        // Configure marked with syntax highlighting
+        marked.setOptions({
+            highlight: function(code, language) {
+                if (language && hljs.getLanguage(language)) {
+                    return hljs.highlight(code, { language: language }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            breaks: true
+        });
+
+        var chatBox = document.getElementById("chat-box");
+        var fileUploadArea = document.getElementById("file-upload-area");
+        var fileNameDisplay = document.getElementById("file-name-display");
+        var typingIndicator = document.getElementById("typing-indicator");
+        var voiceButton = document.getElementById('voice-btn');
+        var micAnimation = document.querySelector('.mic-animation');
+        const attachButton = document.getElementById('attach-btn');
+
+        // Function to add message with typing animation
+        function addMessageWithTyping(message, isBot = false, isDoc = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = isBot ? 'bot-msg' : 'user-msg';
+
+             if (isDoc) {
+                messageDiv.classList.add('doc');
+            }
+            
+            if (isBot || isDoc) {
+                // Convert markdown to HTML for bot messages
+                const htmlContent = marked.parse(message);
+                messageDiv.innerHTML = htmlContent;
+                
+                // Add typing animation
+                messageDiv.style.opacity = '0';
+                chatBox.appendChild(messageDiv);
+                
+                // Trigger typing animation
+                let charIndex = 0;
+                messageDiv.style.opacity = '1';
+                
+                // Highlight code blocks after markdown conversion
+                messageDiv.querySelectorAll('pre code').forEach((block) => {
+                    hljs.highlightBlock(block);
+                });
+            } else {
+                messageDiv.textContent = message;
+                chatBox.appendChild(messageDiv);
+            }
+            
+            // Scroll to bottom
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // Function to send message to backend
+        function sendMessage(userInput, file) {
+            var formData = new FormData();
+            formData.append("user_input", userInput);
+            
+            if (file) {
+                formData.append("document", file);
+                var docName = file.name;
+                addMessageWithTyping("Attached file: " + docName, false, true);
+                fileUploadArea.classList.remove('file-selected');
+                fileNameDisplay.textContent = "";
+                  attachButton.innerHTML = '<i class="fas fa-paperclip"></i>';
+            }
+            
+            if (userInput.trim() !== "") {
+                addMessageWithTyping(userInput, false);
+            }
+
+            typingIndicator.style.display = "flex";
+            fetch("/get_response", {
+                method: "POST",
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                typingIndicator.style.display = "none";
+                addMessageWithTyping(data.response, true);
+            })
+            .catch(error => {
+                typingIndicator.style.display = "none";
+                console.error("Error fetching response:", error);
+                addMessageWithTyping("Sorry, there was an error processing your request. Please try again.", true);
+            });
+        }
+
+        // Send message on button click
+        document.getElementById("send-btn").addEventListener("click", function() {
+            var userInput = document.getElementById("user-input").value;
+            document.getElementById("user-input").value = "";
+            sendMessage(userInput, document.getElementById("document-upload").files[0]);
+            document.getElementById("document-upload").value = "";
+        });
+
+        // Send message on pressing Enter key
+        document.getElementById("user-input").addEventListener("keypress", function(event) {
+            if (event.key === "Enter") {
+                var userInput = document.getElementById("user-input").value;
+                document.getElementById("user-input").value = "";
+                sendMessage(userInput, document.getElementById("document-upload").files[0]);
+                document.getElementById("document-upload").value = "";
+            }
+        });
+
+        // Voice input functionality
+        voiceButton.addEventListener("click", function() {
+            micAnimation.classList.add('active');
+            var recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.lang = "en-US";
+            recognition.start();
+
+            recognition.onresult = function(event) {
+                var transcript = event.results[0][0].transcript;
+                document.getElementById("user-input").value = transcript;
+                sendMessage(transcript, document.getElementById("document-upload").files[0]);
+                document.getElementById("document-upload").value = "";
+                micAnimation.classList.remove('active');
+            };
+
+            recognition.onerror = function(event) {
+                console.error("Speech recognition error:", event.error);
+                micAnimation.classList.remove('active');
+            };
+        });
+
+        // Document attach functionality
+        document.getElementById("attach-btn").addEventListener("click", function() {
+            document.getElementById("document-upload").click();
+        });
+
+        // Handle file selection
+        document.getElementById("document-upload").addEventListener("change", function() {
+            var file = this.files[0];
+            if (file) {
+                fileNameDisplay.textContent = file.name;
+                fileUploadArea.classList.add('file-selected');
+                  attachButton.innerHTML = '<i class="fas fa-file-alt"></i>';
+            } else {
+                fileUploadArea.classList.remove('file-selected');
+                fileNameDisplay.textContent = "";
+                 attachButton.innerHTML = '<i class="fas fa-paperclip"></i>';
+            }
+        });
+    </script>
+</body>
+</html>
